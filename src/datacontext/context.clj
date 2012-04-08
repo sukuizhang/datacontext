@@ -133,7 +133,7 @@
 
 (defn do-recover [k v var-f builders contexts wraped-args args]
   (let [[builder context] (find-recover k builders contexts)]
-                (logging/debug (str "recover data [key:" k " value:" v " recover:" (or builder context) "]"))
+                (logging/trace (str "recover data [key:" k " value:" v " recover:" (or builder context) "]"))
                 (cond builder [:in-context (recover k v builder args wraped-args)]
                       context [:make-context (recover k v context)]
                       :else (throw (RuntimeException.
@@ -144,7 +144,7 @@
   (let [{:keys [arglists save]} (meta var-f)
         m-builders (multi-arg-builders arglists @contexts)
         f (var-get var-f)]
-    (logging/debug (str "create wraped function of " var-f " arg builders is:" m-builders " save=" save))
+    (logging/trace (str "create wraped function of " var-f " arg builders is:" m-builders " save=" save))
     (fn [& wraped-args]
       (binding [*changed-values* (atom {})]
         (let [builders (m-builders (count wraped-args))]
