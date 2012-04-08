@@ -26,7 +26,9 @@
 
 (def seek (atom 0))
 (defn u-restore [id old-u new-u _]
-  (swap! datas assoc-in [:u (or id (swap! seek inc))] new-u))
+  (let [new-u (if (:id new-u) new-u (assoc new-u :id (swap! seek inc)))]
+    (swap! datas assoc-in [:u (:id new-u)] new-u)
+    new-u))
 
 (def-context :data 'data-provide 'data-restore)
 (def-context '-- 'context-provide 'context-restore)
@@ -50,8 +52,8 @@
   (set-value! :exp new-exp)
   [--username --exp])
 
-(defn ^{:wrapcontext true :save :u} new-u0 [v] v)
-(defn ^:wrapcontext sum-u0 [u1 u2] (+ u1 u2))
+(defn ^{:wrapcontext true :save :u} new-u0 [v] {:v v})
+(defn ^:wrapcontext sum-u0 [u1 u2] (+ (:v u1) (:v u2)))
 
 (wrap-pure-ns)
 
@@ -65,7 +67,7 @@
   (context "skz" 99) => ["skz" 100]
   (get-data1 :context :username) => "skz"
   (get-data1 :context :exp) => 99
-  (new-u 6)
-  (new-u 7)
-  (new-u 8)
-  (sum-u 1 3) => 14)
+  (let [id1 (:id (new-u 6))
+        id2 (:id (new-u 7))
+        id3 (:id (new-u 11))] 
+    (sum-u id1 id3) => 17))

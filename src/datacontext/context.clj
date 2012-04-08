@@ -131,6 +131,15 @@
                             (conj (:ops context)))]
        (apply f-recover args-recover))))
 
+(defn do-recover [k v var-f builders contexts wraped-args args]
+  (let [[builder context] (find-recover k builders contexts)]
+                (logging/debug (str "recover data [key:" k " value:" v " recover:" (or builder context) "]"))
+                (cond builder [:in-context (recover k v builder args wraped-args)]
+                      context [:make-context (recover k v context)]
+                      :else (throw (RuntimeException.
+                                    (str "can't find recover for your recover key ["
+                                         k "] when invoking wraped-function of:" var-f))))))
+
 (defn wrap-pure-function [var-f]
   (let [{:keys [arglists save]} (meta var-f)
         m-builders (multi-arg-builders arglists @contexts)
@@ -147,13 +156,8 @@
                 args (map #(build-arg % wraped-args) builders)
                 result (apply f args)]
             (logging/trace "invoke wraped-function of:" var-f " wraped-args:" wraped-args " args:" args " result:" result)
-            (if save (change-value save result))
             (doseq [[k v] @*changed-values*]
-              (let [[builder context] (find-recover k builders @contexts)]
-                (logging/debug (str "recover data [key:" k " value:" v " recover:" (or builder context) "]"))
-                (cond builder (recover k v builder args wraped-args)
-                      context (recover k v context)
-                      :else (throw (RuntimeException.
-                                    (str "can't find recover for your recover key ["
-                                         k "] when invoking wraped-function of:" var-f))))))
-            result))))))
+              (do-recover k v var-f builders @contexts wraped-args args))
+            (if save
+              (let [[mode after-recover] (do-recover save result var-f builders @contexts wraped-args args)
+                    result (if (= :make-context mode) after-recover result)] result) result)))))))
