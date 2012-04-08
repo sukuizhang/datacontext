@@ -1,4 +1,4 @@
-(defproject datacontext "1.0.0-SNAPSHOT"
+(defproject datacontext "0.1.0"
   :description "data context"
   :dependencies [[org.clojure/clojure "1.3.0"]
                  [org.clojure/tools.logging "0.2.3"]]

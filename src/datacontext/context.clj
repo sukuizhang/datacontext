@@ -1,8 +1,8 @@
 (ns datacontext.context
   (:require [clojure.tools.logging :as logging]))
 
-(declare ^{:dynamic true :private true} *changed-values*)
 (def ^:private contexts (atom {}))
+(declare ^{:dynamic true :private true} *changed-values*)
 
 (defonce key-arg-name "arg-name")
 (defonce key-wrapcontext :wrapcontext)
@@ -49,12 +49,8 @@
         (throw (RuntimeException. err-arglist-equals))))))
 
 (defn context-for [k contexts]
-  (->> contexts
-       vals
-       (filter (fn [{:keys [key use-argname] :as context}]
-                 (if (or (and use-argname (.startsWith (name k) key))
-                         (and (not use-argname) (.equals (name k) key)))
-                   context)))
+  (->> (vals contexts)
+       (filter #(if (.startsWith (name k) (:key %)) %))
        first))
 
 (defn arg-name [arg context]
@@ -68,7 +64,7 @@
 
 (defn wraped-meta
   [var-pure]
-  (assoc (dissoc (meta var-pure) :wrapcontext) :arglists
+  (assoc (dissoc (meta var-pure) key-wrapcontext) :arglists
          (->> (meta var-pure)
               :arglists
               (map #(wraped-arglist % @contexts)))))
@@ -86,12 +82,13 @@
         idx-rs (idx-ranges idxs)
         arg-names (map arg-name arglist cos)]
     [arg-count
-     (map (fn [idx co arg-name idx-r]
+     (map (fn [idx real-argname co arg-name idx-r]
             {:index idx
+             :real-argname real-argname
              :context co
              :arg-name arg-name
              :idx-range idx-r})
-          (range (count arglist)) cos arg-names idx-rs)]))
+          (range (count arglist)) (map name arglist) cos arg-names idx-rs)]))
 
 (defn multi-arg-builders [arglists contexts]
   (let [m-builders (map (fn [arglist] (arg-builders arglist contexts)) arglists)]
@@ -107,10 +104,32 @@
       (apply (:provide context) invoke-args))
     (nth args (:start idx-range))))
 
-(defn builder-for [k {:keys [arg-name context]}]
-  (let [{:keys [key use-argname]} context]
-    (or (and use-argname (.equals (name k) arg-name))
-        (and (not use-argname) (.equals (name k) key)))))
+(defn builder-for [k {:keys [real-argname arg-name context]}]
+  (let [{:keys [use-argname]} context]
+    (or (.equals (name k) real-argname)
+        (and use-argname (.equals (name k) arg-name)))))
+
+(defn find-recover [k builders contexts]
+  (let [builder (->> builders (filter #(builder-for k %)) first)
+        context (if-not builder (->> (vals contexts)
+                                     (filter (fn [c] (and (not (:use-argname c))
+                                                         (.equals (name k) (:key c)))))
+                                     first))]
+    [builder context]))
+
+(defn recover
+  ([k v context]
+     (let [args (conj (vec (take (count (:arglist context)) (repeat nil)))
+                       nil v (:ops context))]
+        (apply (:recover context) args)))
+  ([k v builder args wraped-args]
+     (let [{:keys [index context arg-name idx-range]} builder
+           f-recover (:recover context)
+           args-recover (-> (subvec wraped-args (:start idx-range) (:end idx-range))
+                            (conj (nth args index) v)
+                            (#(if (:use-argname context) (conj % arg-name) %))
+                            (conj (:ops context)))]
+       (apply f-recover args-recover))))
 
 (defn wrap-pure-function [var-f]
   (let [{:keys [arglists save]} (meta var-f)
@@ -129,18 +148,12 @@
                 result (apply f args)]
             (logging/trace "invoke wraped-function of:" var-f " wraped-args:" wraped-args " args:" args " result:" result)
             (if save (change-value save result))
-            (doseq [[key value] @*changed-values*]
-              (let [h (->> builders (filter #(builder-for key %)) first)]
-                (logging/trace "recover data [key:" key " value:" value " recover:" h "]")
-                (if (nil? h)
-                  (throw (RuntimeException.
-                          (str "can't find recover for your recover key ["
-                               key "] when invoking wraped-function of:" var-f))))
-                (let [{:keys [index context arg-name idx-range]} h
-                      f-recover (:recover context)
-                      args-recover (-> (subvec wraped-args (:start idx-range) (:end idx-range))
-                                       (conj (nth args index) value)
-                                       (#(if (:use-argname context) (conj % arg-name) %))
-                                       (conj (:ops context)))]
-                  (apply f-recover args-recover))))
+            (doseq [[k v] @*changed-values*]
+              (let [[builder context] (find-recover k builders @contexts)]
+                (logging/debug (str "recover data [key:" k " value:" v " recover:" (or builder context) "]"))
+                (cond builder (recover k v builder args wraped-args)
+                      context (recover k v context)
+                      :else (throw (RuntimeException.
+                                    (str "can't find recover for your recover key ["
+                                         k "] when invoking wraped-function of:" var-f))))))
             result))))))

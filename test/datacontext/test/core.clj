@@ -21,8 +21,16 @@
 (defn context-restore [old-value new-value arg-name _]
   (swap! datas assoc-in [:context (keyword arg-name)] new-value))
 
+(defn u-provide [id _]
+  (get-in @datas [:u id]))
+
+(def seek (atom 0))
+(defn u-restore [id old-u new-u _]
+  (swap! datas assoc-in [:u (or id (swap! seek inc))] new-u))
+
 (def-context :data 'data-provide 'data-restore)
 (def-context '-- 'context-provide 'context-restore)
+(def-context :u 'u-provide 'u-restore)
 
 
 (defn ^:wrapcontext get-data [data] data)
@@ -42,6 +50,9 @@
   (set-value! :exp new-exp)
   [--username --exp])
 
+(defn ^{:wrapcontext true :save :u} new-u0 [v] v)
+(defn ^:wrapcontext sum-u0 [u1 u2] (+ u1 u2))
+
 (wrap-pure-ns)
 
 (fact
@@ -53,4 +64,8 @@
   (context "skz" 100) => [nil nil]
   (context "skz" 99) => ["skz" 100]
   (get-data1 :context :username) => "skz"
-  (get-data1 :context :exp) => 99)
+  (get-data1 :context :exp) => 99
+  (new-u 6)
+  (new-u 7)
+  (new-u 8)
+  (sum-u 1 3) => 14)

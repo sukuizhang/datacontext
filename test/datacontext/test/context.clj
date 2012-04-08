@@ -33,7 +33,8 @@
                   :abc {:key "abc" :use-argname false}}]
     (context-for '--xyz contexts) => {:key "--" :use-argname true}
     (context-for '-xyz contexts) => nil
-    (context-for 'abc contexts) => {:key "abc" :use-argname false}))
+    (context-for 'abc contexts) => {:key "abc" :use-argname false}
+    (context-for 'abc1 contexts) => {:key "abc" :use-argname false}))
 
 (fact
   (wraped-arglist '(abc xyz h i j)
@@ -51,9 +52,9 @@
         contexts {:arg1 context1 :arg2 context2 :arg3 context3}
         [arg-count [b0 b1 b2 b3 b4 b5]] (arg-builders '(arg3 b --arg2 c arg1) contexts)]
     arg-count => 8
-    b0 => (just {:index 0 :context context3 :arg-name nil :idx-range {:start 0 :end 3}})
-    b1 => (just {:index 1 :context nil :arg-name nil :idx-range {:start 3 :end 4}})
-    b2 => (just {:index 2 :context context2 :arg-name "arg2" :idx-range {:start 4 :end 4}})
-    b3 => (just {:index 3 :context nil :arg-name nil :idx-range {:start 4 :end 5}})
-    b4 => (just {:index 4 :context context1 :arg-name nil :idx-range {:start 5 :end 8}})
+    b0 => (just {:index 0 :real-argname "arg3" :context context3 :arg-name nil :idx-range {:start 0 :end 3}})
+    b1 => (just {:index 1 :real-argname "b" :context nil :arg-name nil :idx-range {:start 3 :end 4}})
+    b2 => (just {:index 2 :real-argname "--arg2" :context context2 :arg-name "arg2" :idx-range {:start 4 :end 4}})
+    b3 => (just {:index 3 :real-argname "c" :context nil :arg-name nil :idx-range {:start 4 :end 5}})
+    b4 => (just {:index 4 :real-argname "arg1" :context context1 :arg-name nil :idx-range {:start 5 :end 8}})
     b5 => nil))

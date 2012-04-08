@@ -6,7 +6,7 @@
   [key provide recover & [ops]]
   (let [provide (load-string (str "#'" provide))
         recover (if recover (load-string (str "#'" recover)))]
-    (logging/trace (str "binding context [key:" key
+    (logging/debug (str "binding context [key:" key
                         " provide:" provide " recover:" recover " ops:" ops "]"))
     (context/check-context-fns provide recover)
     (let [use-argname (context/use-argname? provide)
