@@ -1,163 +1,97 @@
 (ns datacontext.context
-  (:require [clojure.tools.logging :as logging]))
+  (:require [clojure.tools.logging :as logging]
+            [datacontext.concept :as concept]))
 
-(def ^:private contexts (atom {}))
-(declare ^{:dynamic true :private true} *changed-values*)
+(def ^:private contexts (atom []))
+(def ^{:dynamic true :private true} *changed-values* (atom {}))
 
-(defonce key-arg-name "arg-name")
-(defonce key-wrapcontext :wrapcontext)
-(def err-provide-isfn "provide must be a function")
-(def err-provide-overload "provide function must not has over-load arg lists")
-(def err-provide-arg "provide function must has not less than 2 args")
-(def err-use-argname "recover and provide functions must has same use argname attribute!")
-(def err-recover-isfn "recover must be a function")
-(def err-recover-overload "recover function must not has over-load arg lists")
-(def err-recover-arg "recover function must has not less than 4 args")
-(def err-arglist-equals "arglist of provide must equals to recover's")
-(def err-argcount-duplicate "arg count of wraped function duplicate !")
-(def err-recover-key "can not found recover for your recover data key !")
+(defn bind-context [c]
+  (swap! contexts (fn [cs] (->> cs (filter #(not= (:available-fn %) (:available-fn c))) (cons c)))))
+(defn change-value [key data & [coors]]
+  (swap! *changed-values* assoc key {:coors coors :data data}))
 
-(defn bind-context [key context] (swap! contexts assoc key context))
-(defn change-value [key value] (swap! *changed-values* assoc key value))
-
-(defn use-argname? [fn-var]
-  (let [arglist (-> (meta fn-var) :arglists first)]
-    (and (>= (count arglist) 2)
-         (= key-arg-name (name (nth arglist (- (count arglist) 2)))))))
-
-(defn arg-list [fn-var remove-count]
-  (-> (meta fn-var) :arglists first vec
-      (#(subvec % 0 (- (count %) remove-count)))))
-
-(defn check-context-fns
-  [provide recover]
-  (if (not (fn? (var-get provide))) (throw (RuntimeException. err-provide-isfn)))
-  (if (not= 1 (count (:arglists (meta provide)))) (throw (RuntimeException. err-provide-overload)))
-  (let [use-argname (use-argname? provide)
-        provide-remove-arg-count (if use-argname 2 1)
-        recover-remove-arg-count (if use-argname 4 3)]    
-    (if (< (count (first (:arglists (meta provide)))) provide-remove-arg-count)
-      (throw (RuntimeException. err-provide-arg)))
-    (when recover
-      (if (not (fn? (var-get recover)))(throw (RuntimeException. err-recover-isfn)))
-      (if (not= 1 (count (:arglists (meta recover)))) (throw (RuntimeException. err-recover-overload)))
-      (if (not= use-argname (use-argname? recover))  (throw (RuntimeException. err-use-argname)))
-      (if (< (count (first (:arglists (meta recover)))) recover-remove-arg-count)
-        (throw (RuntimeException. err-recover-arg)))
-      (if (not= (arg-list provide provide-remove-arg-count)
-                (arg-list recover recover-remove-arg-count))
-        (throw (RuntimeException. err-arglist-equals))))))
-
-(defn context-for [k contexts]
-  (->> (vals contexts)
-       (filter #(if (.startsWith (name k) (:key %)) %))
-       first))
-
-(defn arg-name [arg context]
-  (if (:use-argname context) (.substring (str arg) (.length (:key context)))))
-
-(defn wraped-arglist [arglist contexts]
+(defn inf-fn-arglist
+  "计算逻辑函数一个参数表对应的接口函数的参数表。
+   规则是把所有找到DataContext的参数换成DataContext的coor-args列表。"
+  [contexts arglist]
   (let [f-args (fn [arg]
-                 (let [c (context-for arg contexts)]
+                 (let [c (concept/data-context-for contexts arg)]
                    (if c (map #(symbol (str arg "-" %)) (:arglist c)) [arg])))]
     (vec (mapcat f-args arglist))))
 
-(defn wraped-meta
-  [var-pure]
-  (assoc (dissoc (meta var-pure) key-wrapcontext) :arglists
-         (->> (meta var-pure)
-              :arglists
-              (map #(wraped-arglist % @contexts)))))
+(defn inf-fn-meta
+  "构建接口函数的meta，遵循以下几个规则:
+   1.把逻辑函数的每个参数表映根据找到的DataContext映射成接口函数的参数表。
+   2.去掉:wrapcontext。
+   3.其它所有meta原样保留。"
+  [contexts var-fn-logic]
+  (let [new-arglists (->> (meta var-fn-logic)
+                          :arglists
+                          (map #(inf-fn-arglist contexts %)))]
+    (-> (meta var-fn-logic)
+        (dissoc concept/keyword-wrapcontext)
+        (assoc :arglists new-arglists))))
 
-(defn idx-ranges [idxs]
-  (let [idxs (vec idxs)]
-    (map (fn [i] {:start (apply + (subvec idxs 0 i))
-                 :end (apply + (subvec idxs 0 (+ 1 i)))})
-         (range (count idxs)))))
-
-(defn arg-builders [arglist contexts]
-  (let [cos (map (fn [arg] (context-for arg contexts)) arglist)
-        idxs (map #(if % (count (:arglist %)) 1) cos)
-        arg-count (apply + idxs)
-        idx-rs (idx-ranges idxs)
-        arg-names (map arg-name arglist cos)]
-    [arg-count
-     (map (fn [idx real-argname co arg-name idx-r]
-            {:index idx
-             :real-argname real-argname
-             :context co
-             :arg-name arg-name
-             :idx-range idx-r})
-          (range (count arglist)) (map name arglist) cos arg-names idx-rs)]))
-
-(defn multi-arg-builders [arglists contexts]
-  (let [m-builders (map (fn [arglist] (arg-builders arglist contexts)) arglists)]
-    (if (not= (count m-builders) (count (distinct (map first m-builders))))
-      (throw (RuntimeException. err-argcount-duplicate)))
-    (into {} m-builders)))
-
-(defn build-arg [{:keys [context arg-name idx-range]} args]
+(defn logic-fn-arg
+  "计算逻辑函数的参数值。
+   如果对应的DataContext不为nil，调用DataContext的provide方法获得参数值，反之则直接返回对应的接口函数参数。"
+  [^ArgContext {:keys [context use-key coor-arg-index-range]} inf-fn-args]
   (if context
-    (let [invoke-args (-> (subvec args (:start idx-range) (:end idx-range))
-                          (#(if (:use-argname context) (conj % arg-name) %))
-                          (conj (:ops context)))]
+    (let [invoke-args (-> (subvec inf-fn-args (:start coor-arg-index-range) (:end coor-arg-index-range))
+                          (concat (if (:use-key? context) [use-key]))
+                          (concat [(:ops context)]))]
       (apply (:provide context) invoke-args))
-    (nth args (:start idx-range))))
+    (nth inf-fn-args (:start coor-arg-index-range))))
 
-(defn builder-for [k {:keys [real-argname arg-name context]}]
-  (let [{:keys [use-argname]} context]
-    (or (.equals (name k) real-argname)
-        (and use-argname (.equals (name k) arg-name)))))
+(defn recover-data
+  "回收数据。
+  arg-contexts:  参数上下文ArgContext列表,用来回收以参数名作为key的数据。
+  data-contexts: 数据上下文DataContext列表，用来回收非参数名做key的数据。
+  var-fn-logic:  逻辑函数。
+  inf-args:      接口函数传进来的参数值表。
+  logic-args:    由接口函数参数值表通过provide计算得到的逻辑函数参数值表。
+  key:           回收数据的key。
+  value:         回收的数据，形式为{:coors coors :data data},data是需要回收的数据，coors是数据的坐标，在不是参数名做key是有用"
+  [arg-contexts data-contexts var-fn-logic inf-args logic-args key value] 
+  (let [recover (or (concept/arg-context-for arg-contexts key)
+                    (concept/data-context-for data-contexts key))
+        {:keys [coors data]} value]
+    (logging/trace (pr-str "recover data [key:" key " value:" value " recover:" recover "]"))
+    (cond (= datacontext.concept.DataContext (type recover))
+          (let [invoke-args (-> (or coors (take (count (:coor-args recover)) (repeat nil)))
+                                (concat (if (:use-key? recover) [nil]))
+                                (concat [nil data (:ops recover)]))]
+            (apply (:recover recover) invoke-args))
+          (= datacontext.concept.ArgContext (type recover))
+          (let [{:keys [index context use-key coor-arg-index-range]} recover
+                invoke-args (-> (subvec inf-args (:start coor-arg-index-range) (:end coor-arg-index-range))
+                                (concat (if (:use-key? context) [use-key]))
+                                (concat [(nth logic-args index) data (:ops context)]))]
+            (apply (:recover context) invoke-args))
+          :else
+          (throw (RuntimeException.
+                  (str "can't find recover for your recover key ["
+                       key "] when invoking wraped-function of:" var-fn-logic))))))
 
-(defn find-recover [k builders contexts]
-  (let [builder (->> builders (filter #(builder-for k %)) first)
-        context (if-not builder (->> (vals contexts)
-                                     (filter (fn [c] (and (not (:use-argname c))
-                                                         (.equals (name k) (:key c)))))
-                                     first))]
-    [builder context]))
-
-(defn recover
-  ([k v context]
-     (let [args (conj (vec (take (count (:arglist context)) (repeat nil)))
-                       nil v (:ops context))]
-        (apply (:recover context) args)))
-  ([k v builder args wraped-args]
-     (let [{:keys [index context arg-name idx-range]} builder
-           f-recover (:recover context)
-           args-recover (-> (subvec wraped-args (:start idx-range) (:end idx-range))
-                            (conj (nth args index) v)
-                            (#(if (:use-argname context) (conj % arg-name) %))
-                            (conj (:ops context)))]
-       (apply f-recover args-recover))))
-
-(defn do-recover [k v var-f builders contexts wraped-args args]
-  (let [[builder context] (find-recover k builders contexts)]
-                (logging/trace (str "recover data [key:" k " value:" v " recover:" (or builder context) "]"))
-                (cond builder [:in-context (recover k v builder args wraped-args)]
-                      context [:make-context (recover k v context)]
-                      :else (throw (RuntimeException.
-                                    (str "can't find recover for your recover key ["
-                                         k "] when invoking wraped-function of:" var-f))))))
-
-(defn wrap-pure-function [var-f]
-  (let [{:keys [arglists save]} (meta var-f)
-        m-builders (multi-arg-builders arglists @contexts)
-        f (var-get var-f)]
-    (logging/trace (str "create wraped function of " var-f " arg builders is:" m-builders " save=" save))
-    (fn [& wraped-args]
+(defn wrap-pure-function
+  "由逻辑函数创建一个接口函数，执行时把接口函数穿进来的坐标参数转换成逻辑函数的数据参数，并执行逻辑函数，执行完之后回收要求更改的数据。"
+  [var-fn-logic]
+  (let [{:keys [arglists save]} (meta var-fn-logic)
+        fn-arg-contexts (concept/fn-arg-contexts @contexts arglists)
+        f (var-get var-fn-logic)]
+    (logging/trace "create inf function of " var-fn-logic " fn arg contexts is:" fn-arg-contexts " save=" save)
+    (fn [& inf-args]
       (binding [*changed-values* (atom {})]
-        (let [builders (m-builders (count wraped-args))]
-          (if (nil? builders)
+        (let [arg-contexts (fn-arg-contexts (count inf-args))]
+          (if (nil? arg-contexts)
             (throw (IllegalArgumentException.
-                    (str "Wrong number of args (" (count wraped-args)
-                         ") passed to wraped-function of:" var-f))))
-          (let [wraped-args (vec wraped-args)
-                args (map #(build-arg % wraped-args) builders)
-                result (apply f args)]
-            (logging/trace "invoke wraped-function of:" var-f " wraped-args:" wraped-args " args:" args " result:" result)
-            (doseq [[k v] @*changed-values*]
-              (do-recover k v var-f builders @contexts wraped-args args))
-            (if save
-              (let [[mode after-recover] (do-recover save result var-f builders @contexts wraped-args args)
-                    result (if (= :make-context mode) after-recover result)] result) result)))))))
+                    (str "Wrong number of args (" (count inf-args)
+                         ") passed to wraped-function of:" var-fn-logic))))
+          (let [inf-args (vec inf-args)
+                logic-args (map #(logic-fn-arg % inf-args) arg-contexts)
+                result (apply f logic-args)]
+            (logging/trace "invoke inf-function of:" var-fn-logic " inf-fn-args:" inf-args " logic args:" logic-args " result:" result)
+            (if save (change-value save result))
+            (doseq [[key value] @*changed-values*]
+              (change-value key (recover-data arg-contexts @contexts var-fn-logic inf-args logic-args key value)))
+            (or (and save (get-in @*changed-values* [save :data])) result)))))))

@@ -13,13 +13,14 @@
   (get-in @datas [key1 key2]))
 
 (defn data-restore [key1 key2 old-value new-value -]
-  (swap! datas assoc-in [key1 key2] new-value))
+  (swap! datas assoc-in [key1 key2] new-value)
+  new-value)
 
-(defn context-provide [arg-name _]
-  (get-in @datas [:context (keyword arg-name)]))
+(defn context-provide [--key _]
+  (get-in @datas [:context (keyword --key)]))
 
-(defn context-restore [old-value new-value arg-name _]
-  (swap! datas assoc-in [:context (keyword arg-name)] new-value))
+(defn context-restore [--key old-value new-value _]
+  (swap! datas assoc-in [:context (keyword --key)] new-value))
 
 (defn u-provide [id _]
   (get-in @datas [:u id]))
@@ -60,7 +61,7 @@
 (fact
   (get-data1 :a :b) => nil
   (add :a :b 3) => 3
-  (wsub :a :b -6) => 9
+  (wsub :a :b -6) => 9 ()
   (get-data1 :a :b) => 9
   (get-data1 :c :d) => nil
   (context "skz" 100) => [nil nil]
