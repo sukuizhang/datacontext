@@ -17,14 +17,10 @@
     wrapcontext => nil))
 
 (fact
-  (defn p1 [x y ops] (+ x y (:v ops)))
-  (defn p2 [x y --key ops] (str x y --key (:v ops)))
-  (let [c1 {:provide p1 :ops {:v 17}}
-        c2 {:provide p2 :ops {:v "ops"} :use-key? true}
+  (defn p [x y --key ops] (str x y --key (:v ops)))
+  (let [c {:provide p :ops {:v "ops"}}
         ac1 {:coor-arg-index-range {:start 0 :end 1}}
-        ac2 {:coor-arg-index-range {:start 1 :end 3} :context c1}
-        ac3 {:coor-arg-index-range {:start 3 :end 5} :context c2 :use-key "--use-key--"}
-        inf-fn-args ["inf-arg" 15 21 "abc" "xyz"]]
+        ac2 {:coor-arg-index-range {:start 1 :end 3} :context c :argname "-argname-"}
+        inf-fn-args ["inf-arg" "abc" "xyz"]]
     (logic-fn-arg ac1 inf-fn-args) => "inf-arg"
-    (logic-fn-arg ac2 inf-fn-args) => 53
-    (logic-fn-arg ac3 inf-fn-args) => "abcxyz--use-key--ops"))
+    (logic-fn-arg ac2 inf-fn-args) => "abcxyz-argname-ops"))

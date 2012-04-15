@@ -35,11 +35,10 @@
 (defn logic-fn-arg
   "计算逻辑函数的参数值。
    如果对应的DataContext不为nil，调用DataContext的provide方法获得参数值，反之则直接返回对应的接口函数参数。"
-  [^ArgContext {:keys [context use-key coor-arg-index-range]} inf-fn-args]
+  [^ArgContext {:keys [context argname coor-arg-index-range]} inf-fn-args]
   (if context
     (let [invoke-args (-> (subvec inf-fn-args (:start coor-arg-index-range) (:end coor-arg-index-range))
-                          (concat (if (:use-key? context) [use-key]))
-                          (concat [(:ops context)]))]
+                          (conj argname (:ops context)))]
       (apply (:provide context) invoke-args))
     (nth inf-fn-args (:start coor-arg-index-range))))
 
@@ -52,21 +51,20 @@
   logic-args:    由接口函数参数值表通过provide计算得到的逻辑函数参数值表。
   key:           回收数据的key。
   value:         回收的数据，形式为{:coors coors :data data},data是需要回收的数据，coors是数据的坐标，在不是参数名做key是有用"
-  [arg-contexts data-contexts var-fn-logic inf-args logic-args key value] 
+  [arg-contexts data-contexts var-fn-logic inf-args logic-args key value]
   (let [recover (or (concept/arg-context-for arg-contexts key)
                     (concept/data-context-for data-contexts key))
         {:keys [coors data]} value]
     (logging/trace (pr-str "recover data [key:" key " value:" value " recover:" recover "]"))
     (cond (= datacontext.concept.DataContext (type recover))
           (let [invoke-args (-> (or coors (take (count (:coor-args recover)) (repeat nil)))
-                                (concat (if (:use-key? recover) [nil]))
-                                (concat [nil data (:ops recover)]))]
+                                vec
+                                (conj nil nil data (:ops recover)))]
             (apply (:recover recover) invoke-args))
           (= datacontext.concept.ArgContext (type recover))
-          (let [{:keys [index context use-key coor-arg-index-range]} recover
+          (let [{:keys [index context argname coor-arg-index-range]} recover
                 invoke-args (-> (subvec inf-args (:start coor-arg-index-range) (:end coor-arg-index-range))
-                                (concat (if (:use-key? context) [use-key]))
-                                (concat [(nth logic-args index) data (:ops context)]))]
+                                (conj argname (nth logic-args index) data (:ops context)))]
             (apply (:recover context) invoke-args))
           :else
           (throw (RuntimeException.

@@ -9,24 +9,24 @@
 
 (def datas (atom {}))
 
-(defn data-provide [key1 key2 _]
+(defn data-provide [key1 key2 _ _]
   (get-in @datas [key1 key2]))
 
-(defn data-restore [key1 key2 old-value new-value -]
+(defn data-restore [key1 key2 _ old-value new-value -]
   (swap! datas assoc-in [key1 key2] new-value)
   new-value)
 
-(defn context-provide [--key _]
-  (get-in @datas [:context (keyword --key)]))
+(defn context-provide [key _]
+  (get-in @datas [:context (keyword key)]))
 
-(defn context-restore [--key old-value new-value _]
-  (swap! datas assoc-in [:context (keyword --key)] new-value))
+(defn context-restore [key old-value new-value _]
+  (swap! datas assoc-in [:context (keyword key)] new-value))
 
-(defn u-provide [id _]
+(defn u-provide [id _ _]
   (get-in @datas [:u id]))
 
 (def seek (atom 0))
-(defn u-restore [id old-u new-u _]
+(defn u-restore [id _ old-u new-u _]
   (let [new-u (if (:id new-u) new-u (assoc new-u :id (swap! seek inc)))]
     (swap! datas assoc-in [:u (:id new-u)] new-u)
     new-u))
@@ -49,8 +49,8 @@
 
 (defn ^:wrapcontext context0
   [--username --exp new-username new-exp]
-  (set-value! :username new-username)
-  (set-value! :exp new-exp)
+  (set-value! :--username new-username)
+  (set-value! :--exp new-exp)
   [--username --exp])
 
 (defn ^{:wrapcontext true :save :u} new-u0 [v] {:v v})
@@ -61,13 +61,13 @@
 (fact
   (get-data1 :a :b) => nil
   (add :a :b 3) => 3
-  (wsub :a :b -6) => 9 ()
+  (wsub :a :b -6) => 9
   (get-data1 :a :b) => 9
   (get-data1 :c :d) => nil
   (context "skz" 100) => [nil nil]
   (context "skz" 99) => ["skz" 100]
-  (get-data1 :context :username) => "skz"
-  (get-data1 :context :exp) => 99
+  (get-data1 :context :--username) => "skz"
+  (get-data1 :context :--exp) => 99
   (let [id1 (:id (new-u 6))
         id2 (:id (new-u 7))
         id3 (:id (new-u 11))] 

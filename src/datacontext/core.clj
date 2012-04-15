@@ -5,7 +5,7 @@
 
 (defn def-context
   "定义一个数据上下文。
-   available: 用来指定数据上下文适合于哪些key，可以直接指定一个函数，也可以指定一个string，symbol或keyweod，这样将使用一个默认的要求key以指定名字开头的函数。函数的型为 string (available key),返回的字符串作为use-key来使用，返回nil则表示不适用。
+   available: 用来判断数据上下文是否适合于某个key，可以直接指定一个函数，也可以指定一个string，symbol或keyweod，这样将要求key以(name available)开头。
    provide:   指定一个provide函数，必须传入var或者可以访问到这个函数的symbol。
    recover:   指定一个recover函数，必须传入var或者可以访问到这个函数的symbol。
    ops:       指定一个在执行provide和recover函数时使用的ops参数。"
